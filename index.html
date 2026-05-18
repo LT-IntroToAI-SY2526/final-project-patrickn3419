@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Chord Progression Spicer — Letters Only</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#0b1020;--panel:#0f1724;--muted:#9aa3d6;--accent:#6f8bff}
+  *{box-sizing:border-box}
+  body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial; margin:0; background:var(--bg); color:#eaf0ff; display:flex; justify-content:center; padding:28px;}
+  .app{width:100%;max-width:920px;background:linear-gradient(180deg,var(--panel),#071028);border-radius:12px;padding:20px;box-shadow:0 18px 40px rgba(2,6,23,0.7)}
+  h1{margin:0 0 6px;font-size:20px}
+  p.lead{margin:0 0 14px;color:var(--muted)}
+  .panel{background:rgba(255,255,255,0.02);padding:14px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);margin-top:12px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+  select,input[type=number]{background:#0f1724;color:#eaf0ff;border:1px solid rgba(255,255,255,0.03);padding:8px 10px;border-radius:8px}
+  .controls{display:flex;gap:12px;flex-wrap:wrap;align-items:end}
+  .options{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+  .opt{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:13px}
+  button{background:linear-gradient(90deg,var(--accent),#b36bff);border:none;color:white;padding:10px 14px;border-radius:8px;cursor:pointer;font-weight:600}
+  .chords{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .pill{background:#071428;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,0.03);font-weight:700}
+  textarea{width:100%;height:90px;background:#071028;color:#dfe8ff;border-radius:8px;padding:10px;border:1px solid rgba(255,255,255,0.03);margin-top:10px}
+  .small{font-size:13px;color:var(--muted)}
+</style>
+</head>
+<body>
+  <div class="app" role="main">
+    <h1>Chord Progression Spicer</h1>
+    <p class="lead">Generates chord progressions as letter chords and exports the progression text. Playback removed.</p>
+
+    <div class="panel">
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <div style="flex:1 1 220px">
+          <label>Key</label>
+          <select id="keySelect">
+            <option value="C">C major</option>
+            <option value="G">G major</option>
+            <option value="D">D major</option>
+            <option value="A">A major</option>
+            <option value="E">E major</option>
+            <option value="F">F major</option>
+            <option value="Am">A minor</option>
+            <option value="Em">E minor</option>
+            <option value="Dm">D minor</option>
+          </select>
+        </div>
+
+        <div style="flex:1 1 320px">
+          <label>Base progression</label>
+          <select id="baseSelect"></select>
+        </div>
+
+        <div style="width:140px">
+          <label>Seed (optional)</label>
+          <input id="seed" type="number" placeholder="random" />
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <label>Spice options</label>
+        <div class="options">
+          <label class="opt"><input type="checkbox" id="secDom" checked /> <span class="small">Secondary dominants</span></label>
+          <label class="opt"><input type="checkbox" id="modal" checked /> <span class="small">Modal interchange</span></label>
+          <label class="opt"><input type="checkbox" id="ext" checked /> <span class="small">Extensions (7/9)</span></label>
+          <label class="opt"><input type="checkbox" id="subs" checked /> <span class="small">ii-V / Tritone subs</span></label>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+        <button id="generate">Generate</button>
+        <button id="copy">Copy progression</button>
+        <div style="margin-left:auto" class="small">Output: <strong>letters & keys</strong></div>
+      </div>
+
+      <div class="panel" style="margin-top:12px">
+        <h3 style="margin:0">Generated progression</h3>
+        <div id="progressionArea" class="chords" aria-live="polite"></div>
+      </div>
+
+      <div class="panel">
+        <h3 style="margin:0">Export</h3>
+        <textarea id="exportArea" readonly></textarea>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* Simplified Chord Progression Spicer (letters only) */
+
+/* Small progression database (Roman numerals) */
+const PROGRESSIONS = [
+  { name: "I - V - vi - IV (pop)", seq: ["I","V","vi","IV"] },
+  { name: "I - vi - IV - V (50s)", seq: ["I","vi","IV","V"] },
+  { name: "ii - V - I (jazz turnaround)", seq: ["ii","V","I"] },
+  { name: "I - IV - V - IV (bluesy)", seq: ["I","IV","V","IV"] },
+  { name: "vi - IV - I - V (modern pop)", seq: ["vi","IV","I","V"] },
+  { name: "I - bVII - IV - I (rock modal)", seq: ["I","bVII","IV","I"] },
+  { name: "i - VII - VI - VII (minor loop)", seq: ["i","VII","VI","VII"] }
+];
+
+/* Note and scale helpers */
+const NOTE_ORDER = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const MAJOR_SCALE_INTERVALS = [0,2,4,5,7,9,11];
+const MINOR_SCALE_INTERVALS = [0,2,3,5,7,8,10];
+const ROMAN_MAP = {
+  "I":0,"ii":1,"II":1,"iii":2,"III":2,"IV":3,"iv":3,"V":4,"v":4,"vi":5,"VI":5,"vii°":6,"VII":6,
+  "i":0,"bVII":6,"bIII":2,"bVI":5
+};
+
+function makeRng(seed) {
+  if (seed == null || seed === "") return Math.random;
+  let s = Number(seed) | 0;
+  return function() {
+    s = (s * 1664525 + 1013904223) | 0;
+    return ((s >>> 0) / 4294967296);
+  };
+}
+
+function getScale(key) {
+  const isMinor = key.endsWith("m") || key.endsWith("min") || key.endsWith("m");
+  const rootName = isMinor ? key.slice(0, -1) : key;
+  const rootIdx = NOTE_ORDER.indexOf(rootName);
+  const intervals = isMinor ? MINOR_SCALE_INTERVALS : MAJOR_SCALE_INTERVALS;
+  const notes = intervals.map(i => NOTE_ORDER[(rootIdx + i) % 12]);
+  return { notes, isMinor, root: rootName };
+}
+
+function romanToChord(roman, keyInfo) {
+  if (roman.startsWith("b")) {
+    const base = roman.slice(1);
+    const deg = ROMAN_MAP[base];
+    if (deg == null) return null;
+    const scaleRootIdx = NOTE_ORDER.indexOf(keyInfo.root);
+    const degInterval = MAJOR_SCALE_INTERVALS[deg];
+    const note = NOTE_ORDER[(scaleRootIdx + degInterval - 1 + 12) % 12];
+    return { name: note, degree: deg, quality: "major", roman };
+  }
+  const deg = ROMAN_MAP[roman];
+  if (deg == null) {
+    const up = roman.toUpperCase();
+    if (ROMAN_MAP[up] != null) return romanToChord(up, keyInfo);
+    return null;
+  }
+  const scale = keyInfo.notes;
+  const note = scale[deg % scale.length];
+  let quality = /^[IVX]+$/.test(roman) ? "major" : "minor";
+  if (roman.includes("°")) quality = "dim";
+  return { name: note, degree: deg, quality, roman };
+}
+
+/* Spice rules (produce items that will be converted to letter chords) */
+
+function applySecondaryDominants(seq, keyInfo, rng) {
+  const out = [];
+  for (let i=0;i<seq.length;i++){
+    const r = seq[i].roman;
+    if (rng() < 0.45 && !r.startsWith("V") && !r.startsWith("v") && !r.startsWith("b")) {
+      const targetDeg = ROMAN_MAP[r] ?? null;
+      if (targetDeg != null) {
+        const scaleRootIdx = NOTE_ORDER.indexOf(keyInfo.root);
+        const targetInterval = MAJOR_SCALE_INTERVALS[targetDeg];
+        const targetNoteIdx = (scaleRootIdx + targetInterval) % 12;
+        const domRootIdx = (targetNoteIdx + 7) % 12;
+        const domNote = NOTE_ORDER[domRootIdx];
+        out.push({ type:"secDom", label: domNote + "7" });
+      }
+    }
+    out.push({ type:"diatonic", roman: r });
+  }
+  return out;
+}
+
+function applyModalInterchange(seq, keyInfo, rng) {
+  return seq.map(item => {
+    if (item.type && item.type !== "diatonic") return item;
+    const r = item.roman;
+    if (rng() < 0.35) {
+      const choices = {
+        "IV": ["bVII","bVI"],
+        "V": ["bVII","bIII"],
+        "vi": ["bVI"],
+        "I": ["bVII"]
+      };
+      const cands = choices[r] || [];
+      if (cands.length) {
+        const pick = cands[Math.floor(rng()*cands.length)];
+        return { type:"borrowed", roman: pick };
+      }
+    }
+    return item;
+  });
+}
+
+function applyExtensions(seq, keyInfo, rng) {
+  return seq.map(item => {
+    if (item.type === "secDom") return item;
+    if (item.roman && rng() < 0.6) {
+      const add7 = rng() < 0.7;
+      const add9 = add7 && rng() < 0.25;
+      return { ...item, add7, add9 };
+    }
+    return item;
+  });
+}
+
+function applySubstitutions(seq, keyInfo, rng) {
+  const out = [];
+  for (let i=0;i<seq.length;i++){
+    const item = seq[i];
+    if (item.type === "diatonic" && item.roman === "V" && rng() < 0.4) {
+      if (rng() < 0.5) {
+        const scaleRootIdx = NOTE_ORDER.indexOf(keyInfo.root);
+        const vDeg = ROMAN_MAP["V"];
+        const vInterval = MAJOR_SCALE_INTERVALS[vDeg];
+        const vRootIdx = (scaleRootIdx + vInterval) % 12;
+        const tritoneRoot = NOTE_ORDER[(vRootIdx + 6) % 12];
+        out.push({ type:"tritoneSub", label: tritoneRoot + "7" });
+        continue;
+      } else {
+        out.push({ type:"diatonic", roman:"ii" });
+        out.push(item);
+        continue;
+      }
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+/* Finalize items into letter chords and readable labels */
+
+function buildVoicingLabelFromRoman(item, keyInfo) {
+  const roman = item.roman || item;
+  const chord = romanToChord(roman, keyInfo);
+  if (!chord) return roman;
+  let label = chord.name;
+  if (item.add7) label += "7";
+  if (item.add9) label += "9";
+  return label;
+}
+
+function finalizeSequence(items, keyInfo) {
+  const final = [];
+  for (const it of items) {
+    if (it.type === "secDom" || it.type === "tritoneSub") {
+      final.push({ label: it.label });
+    } else if (it.type === "borrowed") {
+      const label = buildVoicingLabelFromRoman(it, keyInfo);
+      final.push({ label });
+    } else {
+      const label = buildVoicingLabelFromRoman(it, keyInfo);
+      final.push({ label });
+    }
+  }
+  return final;
+}
+
+/* UI wiring */
+
+const baseSelect = document.getElementById("baseSelect");
+const keySelect = document.getElementById("keySelect");
+const generateBtn = document.getElementById("generate");
+const progressionArea = document.getElementById("progressionArea");
+const exportArea = document.getElementById("exportArea");
+const copyBtn = document.getElementById("copy");
+const seedInput = document.getElementById("seed");
+const secDomChk = document.getElementById("secDom");
+const modalChk = document.getElementById("modal");
+const extChk = document.getElementById("ext");
+const subsChk = document.getElementById("subs");
+
+/* populate base progressions */
+PROGRESSIONS.forEach(p => {
+  const opt = document.createElement("option");
+  opt.value = p.name;
+  opt.textContent = p.name;
+  baseSelect.appendChild(opt);
+});
+
+/* helper to get base by name */
+function getBaseByName(name) {
+  return PROGRESSIONS.find(p => p.name === name) || PROGRESSIONS[0];
+}
+
+/* render progression pills */
+function renderProgression(final) {
+  progressionArea.innerHTML = "";
+  final.forEach(ch => {
+    const d = document.createElement("div");
+    d.className = "pill";
+    d.textContent = ch.label;
+    progressionArea.appendChild(d);
+  });
+}
+
+/* main generate pipeline */
+function generate() {
+  const key = keySelect.value;
+  const keyInfo = getScale(key);
+  const base = getBaseByName(baseSelect.value);
+  const seed = seedInput.value;
+  const rng = makeRng(seed);
+  let seq = base.seq.map(r => ({ type:"diatonic", roman: r }));
+  if (secDomChk.checked) seq = applySecondaryDominants(seq, keyInfo, rng);
+  if (modalChk.checked) seq = applyModalInterchange(seq, keyInfo, rng);
+  if (subsChk.checked) seq = applySubstitutions(seq, keyInfo, rng);
+  if (extChk.checked) seq = applyExtensions(seq, keyInfo, rng);
+  const final = finalizeSequence(seq, keyInfo);
+  renderProgression(final);
+  const letters = final.map(f => f.label).join(" | ");
+  exportArea.value = `Key: ${key}\nBase: ${base.name}\nProgression: ${letters}`;
+  window._lastGenerated = { final, keyInfo, key, baseName: base.name };
+}
+
+/* ensure Generate actually works when clicked */
+generateBtn.addEventListener("click", generate);
+
+/* initial generate so UI shows something */
+generate();
+
+/* copy export text */
+copyBtn.addEventListener("click", () => {
+  exportArea.select();
+  document.execCommand("copy");
+  copyBtn.textContent = "Copied!";
+  setTimeout(()=>copyBtn.textContent="Copy progression",900);
+});
+</script>
+</body>
+</html>
