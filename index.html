@@ -23,6 +23,10 @@
   .pill{background:#071428;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,0.03);font-weight:700}
   textarea{width:100%;height:90px;background:#071028;color:#dfe8ff;border-radius:8px;padding:10px;border:1px solid rgba(255,255,255,0.03);margin-top:10px}
   .small{font-size:13px;color:var(--muted)}
+  .chord-grid{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px}
+  .chord-card{text-align:center;min-width:90px}
+  .chord-name{font-weight:700;font-size:14px;margin-bottom:4px}
+  .chord-tab{font-family:monospace;font-size:12px;color:var(--muted);margin-top:4px;white-space:pre;line-height:1.2}
 </style>
 </head>
 <body>
@@ -52,9 +56,9 @@
           <select id="baseSelect"></select>
         </div>
 
-        <div style="width:140px">
+        <div style="flex:0 0 160px">
           <label>Seed (optional)</label>
-          <input id="seed" type="number" placeholder="random" />
+          <input id="seed" type="number" placeholder="any number" style="width:100%" />
         </div>
       </div>
 
@@ -79,6 +83,11 @@
         <div id="progressionArea" class="chords" aria-live="polite"></div>
       </div>
 
+      <div class="panel" style="margin-top:12px">
+        <h3 style="margin:0">Guitar tab (EADGBe)</h3>
+        <div id="guitarArea" class="chord-grid" aria-live="polite"></div>
+      </div>
+
       <div class="panel">
         <h3 style="margin:0">Export</h3>
         <textarea id="exportArea" readonly></textarea>
@@ -89,7 +98,7 @@
 <script>
 /* Simplified Chord Progression Spicer (letters only) */
 
-/* Small progression database (Roman numerals) */
+/* Chord progression database */
 const PROGRESSIONS = [
   { name: "I - V - vi - IV (pop)", seq: ["I","V","vi","IV"] },
   { name: "I - vi - IV - V (50s)", seq: ["I","vi","IV","V"] },
@@ -97,8 +106,353 @@ const PROGRESSIONS = [
   { name: "I - IV - V - IV (bluesy)", seq: ["I","IV","V","IV"] },
   { name: "vi - IV - I - V (modern pop)", seq: ["vi","IV","I","V"] },
   { name: "I - bVII - IV - I (rock modal)", seq: ["I","bVII","IV","I"] },
-  { name: "i - VII - VI - VII (minor loop)", seq: ["i","VII","VI","VII"] }
+  { name: "i - VII - VI - VII (minor loop)", seq: ["i","VII","VI","VII"] },
+  { name: "I - vi - ii - V (jazzy)", seq: ["I","vi","ii","V"] },
+  { name: "I - IV - vi - V (sensitive)", seq: ["I","IV","vi","V"] },
+  { name: "I - iii - IV - V (musical)", seq: ["I","iii","IV","V"] },
+  { name: "IV - V - iii - vi (axis)", seq: ["IV","V","iii","vi"] },
+  { name: "i - VI - III - VII (epic minor)", seq: ["i","VI","III","VII"] },
+  { name: "IV - III - vi - V (plagal)", seq: ["IV","III","vi","V"] }
 ];
+
+/* Guitar chord database - positions as [fret, string] in EADGBe (6=low E, 1=high e) */
+/* Each chord may have multiple voicings stored as array */
+const GUITAR_CHORDS = {
+  "C": [
+    {"positions":[[3,6],[2,5],[0,4],[0,3],[1,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[8,5],[10,4],[10,3],[10,2],[8,1]],"baseFret":8,"name":"barre"},
+    {"positions":[[0,6],[3,5],[2,4],[0,3],[1,2],[0,1]],"baseFret":1,"name":"3rd fret"}
+  ],
+  "D": [
+    {"positions":[[0,6],[0,5],[0,4],[2,3],[3,2],[2,1]],"baseFret":1},
+    {"positions":[[0,6],[5,5],[5,4],[5,3],[5,2],[7,1]],"baseFret":5,"name":"A shape barre"},
+    {"positions":[[0,6],[5,5],[4,4],[2,3],[3,2],[0,1]],"baseFret":5,"name":"open D"}
+  ],
+  "E": [
+    {"positions":[[0,6],[0,5],[1,4],[2,3],[2,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[2,5],[2,4],[4,3],[4,2],[0,1]],"baseFret":2,"name":"moveable"},
+    {"positions":[[0,6],[0,5],[9,4],[9,3],[9,2],[7,1]],"baseFret":7,"name":"barre"}
+  ],
+  "F": [
+    {"positions":[[1,6],[1,5],[2,4],[3,3],[3,2],[1,1]],"baseFret":1},
+    {"positions":[[0,6],[3,5],[3,4],[3,3],[2,2],[1,1]],"baseFret":1,"name":"finger F"},
+    {"positions":[[8,6],[8,5],[10,4],[10,3],[10,2],[8,1]],"baseFret":8,"name":"barre"}
+  ],
+  "G": [
+    {"positions":[[3,6],[2,5],[0,4],[0,3],[0,2],[3,1]],"baseFret":3},
+    {"positions":[[0,6],[2,5],[0,4],[0,3],[3,2],[2,1]],"baseFret":1,"name":"moveable"},
+    {"positions":[[0,6],[0,5],[0,4],[0,3],[3,2],[3,1]],"baseFret":3,"name":"open"}
+  ],
+  "A": [
+    {"positions":[[0,6],[0,5],[2,4],[2,3],[2,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[5,5],[7,4],[7,3],[7,2],[5,1]],"baseFret":5,"name":"barre"},
+    {"positions":[[0,6],[0,5],[7,4],[6,3],[5,2],[0,1]],"baseFret":5,"name":"jazz"}
+  ],
+  "B": [
+    {"positions":[[0,6],[2,5],[4,4],[4,3],[4,2],[2,1]],"baseFret":2},
+    {"positions":[[0,6],[7,5],[7,4],[9,3],[9,2],[7,1]],"baseFret":7,"name":"barre"}
+  ],
+  "C#": [
+    {"positions":[[0,6],[4,5],[6,4],[6,3],[6,2],[4,1]],"baseFret":4},
+    {"positions":[[0,6],[9,5],[9,4],[9,3],[8,2],[7,1]],"baseFret":7,"name":"barre"},
+    {"positions":[[0,6],[4,5],[3,4],[0,3],[2,2],[0,1]],"baseFret":1,"name":"C shape"}
+  ],
+  "D#": [
+    {"positions":[[0,6],[6,5],[8,4],[8,3],[8,2],[6,1]],"baseFret":6},
+    {"positions":[[0,6],[6,5],[5,4],[0,3],[8,2],[6,1]],"baseFret":1}
+  ],
+  "F#": [
+    {"positions":[[2,6],[2,5],[3,4],[4,3],[4,2],[2,1]],"baseFret":2},
+    {"positions":[[0,6],[4,5],[4,4],[4,3],[3,2],[2,1]],"baseFret":1},
+    {"positions":[[9,6],[9,5],[11,4],[11,3],[11,2],[9,1]],"baseFret":9,"name":"barre"}
+  ],
+  "G#": [
+    {"positions":[[0,6],[4,5],[6,4],[6,3],[4,2],[0,1]],"baseFret":4},
+    {"positions":[[0,6],[1,5],[2,4],[3,3],[4,2],[0,1]],"baseFret":1},
+    {"positions":[[4,6],[4,5],[6,4],[6,3],[6,2],[4,1]],"baseFret":4,"name":"barre"}
+  ],
+  "A#": [
+    {"positions":[[1,6],[1,5],[3,4],[3,3],[3,2],[1,1]],"baseFret":1},
+    {"positions":[[0,6],[6,5],[8,4],[8,3],[8,2],[6,1]],"baseFret":6,"name":"barre"},
+    {"positions":[[0,6],[6,5],[5,4],[3,3],[4,2],[1,1]],"baseFret":1}
+  ],
+  "C7": [
+    {"positions":[[0,6],[3,5],[1,4],[3,3],[1,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[3,5],[5,4],[3,3],[4,2],[5,1]],"baseFret":3,"name":"jazz"},
+    {"positions":[[0,6],[8,5],[10,4],[8,3],[9,2],[8,1]],"baseFret":8,"name":"barre"}
+  ],
+  "D7": [
+    {"positions":[[0,6],[0,5],[0,4],[2,3],[1,2],[2,1]],"baseFret":1},
+    {"positions":[[0,6],[0,5],[4,4],[2,3],[3,2],[1,1]],"baseFret":1,"name":"9 voicing"},
+    {"positions":[[0,6],[5,5],[5,4],[5,3],[5,2],[7,1]],"baseFret":5,"name":"barre"}
+  ],
+  "E7": [
+    {"positions":[[0,6],[0,5],[1,4],[0,3],[2,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[2,5],[1,4],[0,3],[2,2],[0,1]],"baseFret":1,"name":"moveable"},
+    {"positions":[[0,6],[7,5],[9,4],[9,3],[9,2],[7,1]],"baseFret":7,"name":"barre"}
+  ],
+  "G7": [
+    {"positions":[[3,6],[2,5],[0,4],[0,3],[0,2],[1,1]],"baseFret":3},
+    {"positions":[[0,6],[0,5],[0,4],[0,3],[3,2],[2,1]],"baseFret":1,"name":"moveable"},
+    {"positions":[[0,6],[2,5],[0,4],[3,3],[3,2],[1,1]],"baseFret":1,"name":"jazz"}
+  ],
+  "A7": [
+    {"positions":[[0,6],[0,5],[2,4],[0,3],[2,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[0,5],[2,4],[2,3],[2,2],[3,1]],"baseFret":1,"name":"no root"},
+    {"positions":[[0,6],[5,5],[5,4],[5,3],[5,2],[7,1]],"baseFret":5,"name":"barre"}
+  ],
+  "B7": [
+    {"positions":[[0,6],[2,5],[0,4],[1,3],[2,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[7,5],[7,4],[9,3],[9,2],[7,1]],"baseFret":7,"name":"barre"},
+    {"positions":[[0,6],[2,5],[1,4],[2,3],[0,2],[2,1]],"baseFret":1,"name":"jazz"}
+  ],
+  "Cmaj7": [
+    {"positions":[[0,6],[3,5],[2,4],[0,3],[0,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[3,5],[2,4],[0,3],[4,2],[3,1]],"baseFret":1,"name":"jazz"},
+    {"positions":[[0,6],[8,5],[10,4],[10,3],[9,2],[8,1]],"baseFret":8,"name":"barre"}
+  ],
+  "Dm7": [
+    {"positions":[[0,6],[0,5],[0,4],[2,3],[1,2],[1,1]],"baseFret":1},
+    {"positions":[[0,6],[0,5],[0,4],[2,3],[3,2],[1,1]],"baseFret":1,"name":"9"},
+    {"positions":[[0,6],[5,5],[5,4],[5,3],[5,2],[8,1]],"baseFret":5,"name":"barre"}
+  ],
+  "Em7": [
+    {"positions":[[0,6],[0,5],[0,4],[2,3],[2,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[2,5],[2,4],[2,3],[0,2],[0,1]],"baseFret":1,"name":"moveable"},
+    {"positions":[[0,6],[0,5],[9,4],[10,3],[10,2],[7,1]],"baseFret":7,"name":"barre"}
+  ],
+  "Am7": [
+    {"positions":[[0,6],[0,5],[2,4],[0,3],[1,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[5,5],[7,4],[5,3],[7,2],[5,1]],"baseFret":5,"name":"barre"},
+    {"positions":[[0,6],[0,5],[2,4],[2,3],[1,2],[0,1]],"baseFret":1,"name":"no root"}
+  ],
+  "Am": [
+    {"positions":[[0,6],[0,5],[2,4],[2,3],[1,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[5,5],[7,4],[7,3],[7,2],[5,1]],"baseFret":5,"name":"barre"},
+    {"positions":[[0,6],[0,5],[5,4],[4,3],[3,2],[0,1]],"baseFret":1,"name":"jazz"}
+  ],
+  "Bm": [
+    {"positions":[[0,6],[2,5],[4,4],[4,3],[3,2],[2,1]],"baseFret":2},
+    {"positions":[[0,6],[7,5],[9,4],[9,3],[9,2],[7,1]],"baseFret":7,"name":"barre"},
+    {"positions":[[0,6],[2,5],[4,4],[4,3],[4,2],[0,1]],"baseFret":2,"name":"open"}
+  ],
+  "Bm7": [
+    {"positions":[[0,6],[2,5],[0,4],[2,3],[0,2],[2,1]],"baseFret":1},
+    {"positions":[[0,6],[7,5],[7,4],[9,3],[9,2],[7,1]],"baseFret":7,"name":"barre"},
+    {"positions":[[0,6],[2,5],[4,4],[2,3],[3,2],[2,1]],"baseFret":2,"name":"jazz"}
+  ],
+  "Dm": [
+    {"positions":[[0,6],[0,5],[0,4],[2,3],[3,2],[1,1]],"baseFret":1},
+    {"positions":[[0,6],[0,5],[5,4],[5,3],[5,2],[3,1]],"baseFret":5,"name":"barre"},
+    {"positions":[[0,6],[0,5],[0,4],[2,3],[1,2],[3,1]],"baseFret":1,"name":"9"}
+  ],
+  "Em": [
+    {"positions":[[0,6],[0,5],[0,4],[2,3],[2,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[2,5],[2,4],[2,3],[0,2],[0,1]],"baseFret":1,"name":"moveable"},
+    {"positions":[[0,6],[7,5],[9,4],[9,3],[9,2],[7,1]],"baseFret":7,"name":"barre"}
+  ],
+  "Fmaj7": [
+    {"positions":[[0,6],[0,5],[0,4],[3,3],[1,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[3,5],[3,4],[3,3],[2,2],[1,1]],"baseFret":1,"name":"jazz"},
+    {"positions":[[8,6],[8,5],[10,4],[10,3],[9,2],[8,1]],"baseFret":8,"name":"barre"}
+  ],
+  "Ddim7": [
+    {"positions":[[0,6],[0,5],[0,4],[1,3],[1,2],[2,1]],"baseFret":1},
+    {"positions":[[0,6],[1,5],[2,4],[1,3],[2,2],[0,1]],"baseFret":1,"name":"jazz"}
+  ],
+  "Adim7": [
+    {"positions":[[0,6],[1,5],[2,4],[0,3],[1,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[5,5],[6,4],[5,3],[6,2],[5,1]],"baseFret":5,"name":"barre"}
+  ],
+  "Edim7": [
+    {"positions":[[0,6],[1,5],[0,4],[2,3],[1,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[0,5],[3,4],[3,3],[3,2],[1,1]],"baseFret":1}
+  ],
+  "Fdim7": [
+    {"positions":[[1,6],[2,5],[3,4],[1,3],[2,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[4,5],[5,4],[5,3],[5,2],[3,1]],"baseFret":1}
+  ],
+  "Gsus4": [
+    {"positions":[[3,6],[3,5],[0,4],[3,3],[3,2],[1,1]],"baseFret":3},
+    {"positions":[[0,6],[0,5],[3,4],[3,3],[3,2],[1,1]],"baseFret":1,"name":"moveable"},
+    {"positions":[[0,6],[2,5],[0,4],[3,3],[3,2],[1,1]],"baseFret":1,"name":"add9"}
+  ],
+  "Asus4": [
+    {"positions":[[0,6],[0,5],[2,4],[2,3],[3,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[0,5],[2,4],[2,3],[2,2],[0,1]],"baseFret":1,"name":"tight"},
+    {"positions":[[0,6],[5,5],[5,4],[5,3],[8,2],[7,1]],"baseFret":5,"name":"barre"}
+  ],
+  "Esus4": [
+    {"positions":[[0,6],[0,5],[2,4],[2,3],[2,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[0,5],[9,4],[9,3],[9,2],[7,1]],"baseFret":7,"name":"barre"}
+  ],
+  "Dmaj7": [
+    {"positions":[[0,6],[0,5],[0,4],[2,3],[2,2],[2,1]],"baseFret":1},
+    {"positions":[[0,6],[0,5],[0,4],[2,3],[1,2],[2,1]],"baseFret":1,"name":"add9"},
+    {"positions":[[0,6],[5,5],[5,4],[5,3],[5,2],[8,1]],"baseFret":5,"name":"barre"}
+  ],
+  "Amaj7": [
+    {"positions":[[0,6],[0,5],[2,4],[1,3],[2,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[0,5],[2,4],[2,3],[2,2],[0,1]],"baseFret":1,"name":"no root"},
+    {"positions":[[0,6],[5,5],[7,4],[6,3],[7,2],[5,1]],"baseFret":5,"name":"barre"}
+  ],
+  "Emaj7": [
+    {"positions":[[0,6],[0,5],[1,4],[1,3],[0,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[0,5],[9,4],[9,3],[9,2],[7,1]],"baseFret":7,"name":"barre"},
+    {"positions":[[0,6],[2,5],[1,4],[1,3],[0,2],[0,1]],"baseFret":1,"name":"jazz"}
+  ],
+  "D7sus4": [
+    {"positions":[[0,6],[0,5],[0,4],[2,3],[3,2],[1,1]],"baseFret":1},
+    {"positions":[[0,6],[0,5],[0,4],[2,3],[1,2],[3,1]],"baseFret":1,"name":"add9"},
+    {"positions":[[0,6],[5,5],[5,4],[5,3],[5,2],[7,1]],"baseFret":5,"name":"barre"}
+  ],
+  "A7sus4": [
+    {"positions":[[0,6],[0,5],[2,4],[0,3],[3,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[5,5],[5,4],[5,3],[8,2],[7,1]],"baseFret":5,"name":"barre"}
+  ],
+  "Eaug7": [
+    {"positions":[[0,6],[0,5],[1,4],[2,3],[3,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[2,5],[1,4],[2,3],[3,2],[0,1]],"baseFret":1,"name":"jazz"}
+  ],
+  "Caug7": [
+    {"positions":[[0,6],[3,5],[2,4],[3,3],[1,2],[1,1]],"baseFret":1},
+    {"positions":[[0,6],[3,5],[2,4],[3,3],[4,2],[1,1]],"baseFret":1,"name":"jazz"}
+  ],
+  "Aaug7": [
+    {"positions":[[0,6],[0,5],[2,4],[1,3],[2,2],[3,1]],"baseFret":1},
+    {"positions":[[0,6],[5,5],[7,4],[6,3],[7,2],[5,1]],"baseFret":5,"name":"barre"}
+  ],
+  "Gb7": [
+    {"positions":[[2,6],[4,5],[2,4],[3,3],[1,2],[2,1]],"baseFret":1},
+    {"positions":[[0,6],[4,5],[2,4],[3,3],[1,2],[2,1]],"baseFret":1,"name":"jazz"},
+    {"positions":[[0,6],[9,5],[9,4],[10,3],[10,2],[9,1]],"baseFret":9,"name":"barre"}
+  ],
+  "Db7": [
+    {"positions":[[0,6],[0,5],[0,4],[3,3],[1,2],[1,1]],"baseFret":1},
+    {"positions":[[0,6],[1,5],[2,4],[3,3],[1,2],[1,1]],"baseFret":1,"name":"jazz"}
+  ],
+  "Bb7": [
+    {"positions":[[0,6],[1,5],[3,4],[1,3],[2,2],[1,1]],"baseFret":1},
+    {"positions":[[0,6],[6,5],[8,4],[6,3],[8,2],[6,1]],"baseFret":6,"name":"barre"},
+    {"positions":[[0,6],[1,5],[3,4],[3,3],[2,2],[1,1]],"baseFret":1,"name":"no root"}
+  ],
+  "Eb7": [
+    {"positions":[[0,6],[0,5],[1,4],[0,3],[2,2],[0,1]],"baseFret":1},
+    {"positions":[[0,6],[1,5],[0,4],[2,3],[2,2],[1,1]],"baseFret":1,"name":"jazz"}
+  ],
+  "Ab7": [
+    {"positions":[[0,6],[4,5],[2,4],[0,3],[3,2],[4,1]],"baseFret":4},
+    {"positions":[[0,6],[4,5],[4,4],[4,3],[5,2],[4,1]],"baseFret":4,"name":"barre"}
+  ],
+  "F7": [
+    {"positions":[[1,6],[1,5],[2,4],[1,3],[3,2],[1,1]],"baseFret":1},
+    {"positions":[[0,6],[3,5],[2,4],[0,3],[3,2],[1,1]],"baseFret":1,"name":"jazz"},
+    {"positions":[[8,6],[8,5],[10,4],[8,3],[9,2],[8,1]],"baseFret":8,"name":"barre"}
+  ],
+  "ii7": [
+    {"positions":[[0,6],[0,5],[0,4],[2,3],[1,2],[1,1]],"baseFret":1},
+    {"positions":[[0,6],[5,5],[5,4],[5,3],[5,2],[8,1]],"baseFret":5,"name":"barre"}
+  ]
+};
+
+/* Chord quality map for suffix matching */
+const QUALITY_SUFFIX_MAP = {
+  "dom7":"7","maj7":"maj7","min7":"m7","dim7":"dim7",
+  "aug7":"aug7","aug":"+","sus4":"sus4","dim":"dim","sus":"sus4"
+};
+
+/* Guitar chord lookup - returns array of voicings for a chord label */
+function getGuitarChord(label) {
+  if (!label) return null;
+  if (GUITAR_CHORDS[label]) return GUITAR_CHORDS[label];
+  const m = label.match(/^([A-G]#?)(.*)$/);
+  if (!m) return null;
+  const root = m[1];
+  const suffix = m[2] || "";
+  const suffMap = {"7":"7","maj7":"maj7","min7":"m7","dim7":"dim7","dim":"dim","+":"+","sus4":"sus4","sus":"sus4"};
+  const suffixKey = suffMap[suffix] || suffix;
+  const key = root + suffixKey;
+  if (GUITAR_CHORDS[key]) return GUITAR_CHORDS[key];
+  if (suffix.includes("7")) {
+    const base7 = root + "7";
+    if (GUITAR_CHORDS[base7]) return GUITAR_CHORDS[base7];
+  }
+  if (suffix.includes("maj7") || suffix.includes("m7") || suffix.includes("dim") || suffix.includes("+") || suffix.includes("sus")) {
+    if (GUITAR_CHORDS[root]) return GUITAR_CHORDS[root];
+  }
+  if (GUITAR_CHORDS[root]) return GUITAR_CHORDS[root];
+  return null;
+}
+
+/* Render SVG chord diagram */
+function renderChordSVG(chord) {
+  if (!chord) return "";
+  const positions = chord.positions;
+  const baseFret = chord.baseFret || 1;
+  const numFrets = baseFret === 1 ? 5 : 4;
+  const W = 90, H = 110;
+  const margin = { l: 16, r: 12, t: 18, b: 14 };
+  const svgW = W - margin.l - margin.r;
+  const svgH = H - margin.t - margin.b;
+  const strW = svgW / 5;
+  const fretH = svgH / numFrets;
+  let svg = `<svg class="chord-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+  if (baseFret !== 1) {
+    svg += `<text x="${W/2}" y="${margin.t - 4}" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="Inter,sans-serif">${baseFret}fr</text>`;
+  }
+  const x0 = margin.l;
+  const y0 = margin.t;
+  if (baseFret === 1) {
+    svg += `<rect x="${x0}" y="${y0 - 3}" width="${svgW}" height="4" fill="#6f8bff" rx="2"/>`;
+  } else {
+    svg += `<line x1="${x0}" y1="${y0 - 3}" x2="${x0 + svgW}" y2="${y0 - 3}" stroke="#6f8bff" stroke-width="2.5"/>`;
+  }
+  for (let s = 0; s <= 5; s++) {
+    const x = x0 + s * strW;
+    svg += `<line x1="${x}" y1="${y0}" x2="${x}" y2="${y0 + numFrets * fretH}" stroke="#9aa3d6" stroke-width="${s === 0 || s === 5 ? 1.5 : 1}"/>`;
+  }
+  for (let f = 0; f <= numFrets; f++) {
+    const y = y0 + f * fretH;
+    svg += `<line x1="${x0}" y1="${y}" x2="${x0 + svgW}" y2="${y}" stroke="#9aa3d6" stroke-width="1"/>`;
+  }
+  const strMap = { 6: 0, 5: 1, 4: 2, 3: 3, 2: 4, 1: 5 };
+  for (const [fr, str] of positions) {
+    const si = strMap[str];
+    const x = x0 + si * strW;
+    if (fr === 0) {
+      svg += `<circle cx="${x}" cy="${y0 - 8}" r="5" fill="none" stroke="#6f8bff" stroke-width="2"/>`;
+    } else {
+      const y = y0 + (fr - baseFret + 0.5) * fretH;
+      svg += `<circle cx="${x}" cy="${y}" r="5.5" fill="#6f8bff"/>`;
+    }
+  }
+  svg += `</svg>`;
+  return svg;
+}
+
+/* Build tab string for chord (EADGBe standard tuning) */
+function renderChordTab(chord) {
+  if (!chord) return "";
+  const positions = chord.positions;
+  const baseFret = chord.baseFret || 1;
+  const strMap = { 6: 0, 5: 1, 4: 2, 3: 3, 2: 4, 1: 5 };
+  const marks = ["-", "-", "-", "-", "-", "-"];
+  for (const [fr, str] of positions) {
+    const si = strMap[str];
+    if (fr === 0) marks[si] = "O";
+    else if (fr < 0) marks[si] = "X";
+    else marks[si] = String(fr);
+  }
+  const lines = [
+    "e|" + marks[5].padStart(2),
+    "B|" + marks[4].padStart(2),
+    "G|" + marks[3].padStart(2),
+    "D|" + marks[2].padStart(2),
+    "A|" + marks[1].padStart(2),
+    "E|" + marks[0].padStart(2)
+  ];
+  return lines.join("\n");
+}
 
 /* Note and scale helpers */
 const NOTE_ORDER = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
@@ -106,7 +460,8 @@ const MAJOR_SCALE_INTERVALS = [0,2,4,5,7,9,11];
 const MINOR_SCALE_INTERVALS = [0,2,3,5,7,8,10];
 const ROMAN_MAP = {
   "I":0,"ii":1,"II":1,"iii":2,"III":2,"IV":3,"iv":3,"V":4,"v":4,"vi":5,"VI":5,"vii°":6,"VII":6,
-  "i":0,"bVII":6,"bIII":2,"bVI":5
+  "i":0,"bVII":6,"bIII":2,"bVI":5,"bII":1,"bV":4,
+  "I+":0,"IV+":3,"V+":4,"VI+":5,"III+":2
 };
 
 function makeRng(seed) {
@@ -128,44 +483,55 @@ function getScale(key) {
 }
 
 function romanToChord(roman, keyInfo) {
-  if (roman.startsWith("b")) {
-    const base = roman.slice(1);
+  const isAug = roman.includes("+");
+  const romanBase = roman.replace("+","").replace("sus","");
+  if (romanBase.startsWith("b")) {
+    const base = romanBase.slice(1);
     const deg = ROMAN_MAP[base];
     if (deg == null) return null;
     const scaleRootIdx = NOTE_ORDER.indexOf(keyInfo.root);
     const degInterval = MAJOR_SCALE_INTERVALS[deg];
     const note = NOTE_ORDER[(scaleRootIdx + degInterval - 1 + 12) % 12];
-    return { name: note, degree: deg, quality: "major", roman };
+    return { name: note, degree: deg, quality: isAug ? "aug" : "major", roman };
   }
-  const deg = ROMAN_MAP[roman];
+  const deg = ROMAN_MAP[romanBase];
   if (deg == null) {
-    const up = roman.toUpperCase();
-    if (ROMAN_MAP[up] != null) return romanToChord(up, keyInfo);
+    const up = romanBase.toUpperCase();
+    if (ROMAN_MAP[up] != null) return romanToChord(up + (isAug?"+":""), keyInfo);
     return null;
   }
   const scale = keyInfo.notes;
   const note = scale[deg % scale.length];
-  let quality = /^[IVX]+$/.test(roman) ? "major" : "minor";
-  if (roman.includes("°")) quality = "dim";
+  let quality = isAug ? "aug" : (/^[IVX]+$/.test(romanBase) ? "major" : "minor");
+  if (romanBase.includes("°")) quality = "dim";
   return { name: note, degree: deg, quality, roman };
 }
 
-/* Spice rules (produce items that will be converted to letter chords) */
+/* Spice rules - more musical transformations */
+
+const CHORD_QUALITY = {
+  "I": "major7", "i": "min7",
+  "ii": "min7", "ii°": "dim7", "III": "maj7", "iii": "min7",
+  "IV": "maj7", "iv": "min7",
+  "V": "dom7", "V+": "aug7", "v": "min7",
+  "VI": "maj7", "VI+": "aug7", "vi": "min7",
+  "VII": "maj7", "VII+": "aug7", "vii°": "dim7", "vii": "min7",
+  "bVII": "dom7", "bVI": "min7", "bIII": "min7"
+};
 
 function applySecondaryDominants(seq, keyInfo, rng) {
   const out = [];
+  const targets = [1, 3, 5, 6];
   for (let i=0;i<seq.length;i++){
     const r = seq[i].roman;
-    if (rng() < 0.45 && !r.startsWith("V") && !r.startsWith("v") && !r.startsWith("b")) {
-      const targetDeg = ROMAN_MAP[r] ?? null;
-      if (targetDeg != null) {
-        const scaleRootIdx = NOTE_ORDER.indexOf(keyInfo.root);
-        const targetInterval = MAJOR_SCALE_INTERVALS[targetDeg];
-        const targetNoteIdx = (scaleRootIdx + targetInterval) % 12;
-        const domRootIdx = (targetNoteIdx + 7) % 12;
-        const domNote = NOTE_ORDER[domRootIdx];
-        out.push({ type:"secDom", label: domNote + "7" });
-      }
+    const deg = ROMAN_MAP[r];
+    if (rng() < 0.3 && deg != null && targets.includes(deg) && !r.startsWith("V") && !r.startsWith("v") && !r.startsWith("b")) {
+      const scaleRootIdx = NOTE_ORDER.indexOf(keyInfo.root);
+      const targetInterval = MAJOR_SCALE_INTERVALS[deg];
+      const targetNoteIdx = (scaleRootIdx + targetInterval) % 12;
+      const domRootIdx = (targetNoteIdx + 7) % 12;
+      const domNote = NOTE_ORDER[domRootIdx];
+      out.push({ type:"secDom", label: domNote + "7", targetRoman: r });
     }
     out.push({ type:"diatonic", roman: r });
   }
@@ -173,33 +539,45 @@ function applySecondaryDominants(seq, keyInfo, rng) {
 }
 
 function applyModalInterchange(seq, keyInfo, rng) {
-  return seq.map(item => {
-    if (item.type && item.type !== "diatonic") return item;
+  const out = [];
+  for (let i=0;i<seq.length;i++){
+    const item = seq[i];
+    if (item.type && item.type !== "diatonic") { out.push(item); continue; }
     const r = item.roman;
-    if (rng() < 0.35) {
+    if (rng() < 0.25) {
       const choices = {
-        "IV": ["bVII","bVI"],
-        "V": ["bVII","bIII"],
-        "vi": ["bVI"],
-        "I": ["bVII"]
+        "IV": ["bVII","bVI","IV+"],
+        "V": ["bVII","bIII","V+"],
+        "vi": ["bVI","vi°"],
+        "I": ["bVII","bIII","I+"],
+        "ii": ["bII","ii°"],
+        "iii": ["bV","III+"]
       };
       const cands = choices[r] || [];
-      if (cands.length) {
+      if (cands.length && rng() < 0.7) {
         const pick = cands[Math.floor(rng()*cands.length)];
-        return { type:"borrowed", roman: pick };
+        out.push({ type:"borrowed", roman: pick });
+        continue;
       }
     }
-    return item;
-  });
+    out.push(item);
+  }
+  return out;
 }
 
 function applyExtensions(seq, keyInfo, rng) {
   return seq.map(item => {
-    if (item.type === "secDom") return item;
-    if (item.roman && rng() < 0.6) {
-      const add7 = rng() < 0.7;
-      const add9 = add7 && rng() < 0.25;
-      return { ...item, add7, add9 };
+    if (item.type === "secDom" || item.type === "tritoneSub") return item;
+    if (item.roman && rng() < 0.4) {
+      const r = item.roman;
+      let ext = "";
+      if (r === "I" || r === "IV" || r === "III" || r === "VI") ext = "maj7";
+      else if (r === "V" || r.startsWith("bVII")) ext = "7";
+      else if (r === "ii" || r === "vi" || r === "iii" || r.startsWith("b")) ext = "min7";
+      else if (r.includes("°")) ext = "dim7";
+      if (ext && rng() < 0.6) {
+        return { ...item, extension: ext };
+      }
     }
     return item;
   });
@@ -209,20 +587,32 @@ function applySubstitutions(seq, keyInfo, rng) {
   const out = [];
   for (let i=0;i<seq.length;i++){
     const item = seq[i];
-    if (item.type === "diatonic" && item.roman === "V" && rng() < 0.4) {
-      if (rng() < 0.5) {
+    if (item.type === "diatonic" && (item.roman === "V" || item.roman === "v") && rng() < 0.35) {
+      const roll = rng();
+      if (roll < 0.4) {
         const scaleRootIdx = NOTE_ORDER.indexOf(keyInfo.root);
         const vDeg = ROMAN_MAP["V"];
         const vInterval = MAJOR_SCALE_INTERVALS[vDeg];
         const vRootIdx = (scaleRootIdx + vInterval) % 12;
         const tritoneRoot = NOTE_ORDER[(vRootIdx + 6) % 12];
-        out.push({ type:"tritoneSub", label: tritoneRoot + "7" });
+        out.push({ type:"tritoneSub", label: tritoneRoot + "7b9" });
+        continue;
+      } else if (roll < 0.7) {
+        out.push({ type:"diatonic", roman:"ii"});
+        out.push({ type:"diatonic", roman:"V"});
         continue;
       } else {
-        out.push({ type:"diatonic", roman:"ii" });
-        out.push(item);
+        const scaleRootIdx = NOTE_ORDER.indexOf(keyInfo.root);
+        const viDeg = ROMAN_MAP["vi"];
+        const viInterval = MAJOR_SCALE_INTERVALS[viDeg];
+        const viRootIdx = (scaleRootIdx + viInterval) % 12;
+        out.push({ type:"altered", label: NOTE_ORDER[viRootIdx] + "7" });
         continue;
       }
+    }
+    if (item.type === "diatonic" && item.roman === "IV" && rng() < 0.2) {
+      out.push({ type:"altered", label: item.roman + "sus" });
+      continue;
     }
     out.push(item);
   }
@@ -236,19 +626,21 @@ function buildVoicingLabelFromRoman(item, keyInfo) {
   const chord = romanToChord(roman, keyInfo);
   if (!chord) return roman;
   let label = chord.name;
-  if (item.add7) label += "7";
-  if (item.add9) label += "9";
+  if (item.extension) label += item.extension;
   return label;
 }
 
 function finalizeSequence(items, keyInfo) {
   const final = [];
   for (const it of items) {
-    if (it.type === "secDom" || it.type === "tritoneSub") {
+    if (it.type === "secDom" || it.type === "tritoneSub" || it.type === "altered") {
       final.push({ label: it.label });
     } else if (it.type === "borrowed") {
       const label = buildVoicingLabelFromRoman(it, keyInfo);
       final.push({ label });
+    } else if (it.roman && it.roman.includes("sus")) {
+      const chord = romanToChord(it.roman.replace("sus",""), keyInfo);
+      final.push({ label: chord ? chord.name + "sus4" : it.roman });
     } else {
       const label = buildVoicingLabelFromRoman(it, keyInfo);
       final.push({ label });
@@ -266,6 +658,7 @@ const progressionArea = document.getElementById("progressionArea");
 const exportArea = document.getElementById("exportArea");
 const copyBtn = document.getElementById("copy");
 const seedInput = document.getElementById("seed");
+const guitarArea = document.getElementById("guitarArea");
 const secDomChk = document.getElementById("secDom");
 const modalChk = document.getElementById("modal");
 const extChk = document.getElementById("ext");
@@ -295,6 +688,34 @@ function renderProgression(final) {
   });
 }
 
+/* render guitar tabs per chord */
+function renderGuitarTabs(final) {
+  guitarArea.innerHTML = "";
+  final.forEach(ch => {
+    const voicings = getGuitarChord(ch.label);
+    const card = document.createElement("div");
+    card.className = "chord-card";
+    const nameDiv = document.createElement("div");
+    nameDiv.className = "chord-name";
+    nameDiv.textContent = ch.label;
+    card.appendChild(nameDiv);
+    const voicingsArr = Array.isArray(voicings) ? voicings : [voicings];
+    const pick = voicingsArr[Math.floor(Math.random() * voicingsArr.length)];
+    const tab = document.createElement("div");
+    tab.className = "chord-tab";
+    tab.textContent = renderChordTab(pick);
+    if (pick && pick.name) {
+      const lbl = document.createElement("div");
+      lbl.style.fontSize = "10px";
+      lbl.style.color = "var(--muted)";
+      lbl.textContent = pick.name;
+      card.appendChild(lbl);
+    }
+    card.appendChild(tab);
+    guitarArea.appendChild(card);
+  });
+}
+
 /* main generate pipeline */
 function generate() {
   const key = keySelect.value;
@@ -303,14 +724,16 @@ function generate() {
   const seed = seedInput.value;
   const rng = makeRng(seed);
   let seq = base.seq.map(r => ({ type:"diatonic", roman: r }));
-  if (secDomChk.checked) seq = applySecondaryDominants(seq, keyInfo, rng);
-  if (modalChk.checked) seq = applyModalInterchange(seq, keyInfo, rng);
-  if (subsChk.checked) seq = applySubstitutions(seq, keyInfo, rng);
-  if (extChk.checked) seq = applyExtensions(seq, keyInfo, rng);
+  const spiceOpts = [];
+  if (secDomChk.checked) { seq = applySecondaryDominants(seq, keyInfo, rng); spiceOpts.push("Sec Dom"); }
+  if (modalChk.checked) { seq = applyModalInterchange(seq, keyInfo, rng); spiceOpts.push("Modal"); }
+  if (subsChk.checked) { seq = applySubstitutions(seq, keyInfo, rng); spiceOpts.push("Subs"); }
+  if (extChk.checked) { seq = applyExtensions(seq, keyInfo, rng); spiceOpts.push("Extensions"); }
   const final = finalizeSequence(seq, keyInfo);
   renderProgression(final);
+  renderGuitarTabs(final);
   const letters = final.map(f => f.label).join(" | ");
-  exportArea.value = `Key: ${key}\nBase: ${base.name}\nProgression: ${letters}`;
+  exportArea.value = `Key: ${key}\nBase: ${base.name}\nSpice: ${spiceOpts.join(", ") || "none"}\nProgression: ${letters}`;
   window._lastGenerated = { final, keyInfo, key, baseName: base.name };
 }
 
@@ -320,12 +743,26 @@ generateBtn.addEventListener("click", generate);
 /* initial generate so UI shows something */
 generate();
 
-/* copy export text */
+/* copy export text with guitar tabs */
 copyBtn.addEventListener("click", () => {
-  exportArea.select();
+  const data = window._lastGenerated;
+  const final = data?.final || [];
+  const tabLines = [];
+  final.forEach(ch => {
+    const gc = getGuitarChord(ch.label);
+    tabLines.push(ch.label + ":");
+    tabLines.push(renderChordTab(gc));
+    tabLines.push("");
+  });
+  const fullText = exportArea.value + "\n\n--- Guitar Tabs ---\n" + tabLines.join("\n");
+  const ta = document.createElement("textarea");
+  ta.value = fullText;
+  document.body.appendChild(ta);
+  ta.select();
   document.execCommand("copy");
+  document.body.removeChild(ta);
   copyBtn.textContent = "Copied!";
-  setTimeout(()=>copyBtn.textContent="Copy progression",900);
+  setTimeout(() => copyBtn.textContent = "Copy progression", 900);
 });
 </script>
 </body>
