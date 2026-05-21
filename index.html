@@ -14,13 +14,15 @@
   p.lead{margin:0 0 14px;color:var(--muted)}
   .panel{background:rgba(255,255,255,0.02);padding:14px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);margin-top:12px}
   label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
-  select,input[type=number]{background:#0f1724;color:#eaf0ff;border:1px solid rgba(255,255,255,0.03);padding:8px 10px;border-radius:8px}
+  select,input[type=number],input[type=range]{background:#0f1724;color:#eaf0ff;border:1px solid rgba(255,255,255,0.03);padding:8px 10px;border-radius:8px}
   .controls{display:flex;gap:12px;flex-wrap:wrap;align-items:end}
   .options{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
   .opt{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:13px}
   button{background:linear-gradient(90deg,var(--accent),#b36bff);border:none;color:white;padding:10px 14px;border-radius:8px;cursor:pointer;font-weight:600}
+  button.secondary{background:#17213a}
   .chords{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
   .pill{background:#071428;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,0.03);font-weight:700}
+  .pill.active{border-color:var(--accent);box-shadow:0 0 0 2px rgba(111,139,255,0.18);color:white}
   textarea{width:100%;height:90px;background:#071028;color:#dfe8ff;border-radius:8px;padding:10px;border:1px solid rgba(255,255,255,0.03);margin-top:10px}
   .small{font-size:13px;color:var(--muted)}
   .chord-grid{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px}
@@ -30,6 +32,13 @@
   .alt-tabs{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.05)}
   .alt-tab{font-family:monospace;font-size:11px;color:#c3ccff;white-space:pre;line-height:1.2}
   .voicing-label{font-size:10px;color:var(--muted);margin-top:2px}
+  .spice-guide{display:grid;gap:12px;margin:12px 0 0}
+  .spice-guide h3{margin:0}
+  .spice-guide dl{display:grid;gap:10px;margin:0}
+  .spice-guide dt{font-weight:700;color:#eaf0ff}
+  .spice-guide dd{margin:4px 0 0;color:var(--muted);font-size:13px;line-height:1.45}
+  .playback-controls{display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin-top:10px}
+  .tempo-control{display:grid;gap:6px;min-width:220px}
 </style>
 </head>
 <body>
@@ -87,6 +96,19 @@
       </div>
 
       <div class="panel" style="margin-top:12px">
+        <h3 style="margin:0">Playable loop</h3>
+        <div class="playback-controls">
+          <div class="tempo-control">
+            <label for="tempo">Tempo: <strong id="tempoValue">100</strong> BPM</label>
+            <input id="tempo" type="range" min="50" max="180" value="100" />
+          </div>
+          <button id="playLoop">Play loop</button>
+          <button id="stopLoop" class="secondary">Stop</button>
+          <div id="playbackStatus" class="small">Each chord plays for 1 bar in 4/4.</div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:12px">
         <h3 style="margin:0">Guitar tab (EADGBe)</h3>
         <div id="guitarArea" class="chord-grid" aria-live="polite"></div>
       </div>
@@ -95,6 +117,28 @@
         <h3 style="margin:0">Export</h3>
         <textarea id="exportArea" readonly></textarea>
       </div>
+    </div>
+
+    <div class="panel spice-guide" aria-labelledby="spiceGuideTitle">
+      <h3 id="spiceGuideTitle">What the spice options mean</h3>
+      <dl>
+        <div>
+          <dt>Secondary dominants</dt>
+          <dd>Adds a quick dominant 7 chord before another chord, like giving that next chord its own mini V-I pull. To a basic musician: it is a short setup chord that makes the next chord feel more expected and satisfying.</dd>
+        </div>
+        <div>
+          <dt>Modal interchange</dt>
+          <dd>Borrowing a chord from a closely related scale or mode, often making the progression sound darker, brighter, or more surprising. To a basic musician: it is like briefly using a chord from a parallel musical color, then coming back home.</dd>
+        </div>
+        <div>
+          <dt>Extensions (7/9)</dt>
+          <dd>Adds extra notes on top of the basic triad, such as a 7th or 9th. To a basic musician: the chord root stays the same, but the sound becomes fuller, smoother, or more jazzy.</dd>
+        </div>
+        <div>
+          <dt>ii-V / Tritone subs</dt>
+          <dd>Replaces or leads into dominant chords with classic jazz movement. A ii-V creates a strong path toward the next chord; a tritone substitution swaps a dominant chord for another dominant chord three whole steps away for a smoother, bluesier twist.</dd>
+        </div>
+      </dl>
     </div>
   </div>
 
@@ -534,6 +578,66 @@ function getChordTones(label) {
   return new Set(intervals.map(i => NOTE_ORDER[(rootIdx + i) % 12]));
 }
 
+function getChordIntervals(label) {
+  const parsed = parseChordLabel(label || "");
+  if (!parsed) return null;
+  const rootIdx = NOTE_ORDER.indexOf(parsed.normalizedRoot);
+  if (rootIdx < 0) return null;
+  const suffix = parsed.suffix;
+  let intervals = [0, 4, 7];
+  if (suffix === "m" || suffix === "m7") intervals = [0, 3, 7];
+  else if (suffix === "dim" || suffix === "dim7") intervals = [0, 3, 6];
+  else if (suffix === "+" || suffix === "aug7") intervals = [0, 4, 8];
+  else if (suffix === "sus4" || suffix === "sus") intervals = [0, 5, 7];
+  if (suffix === "maj7") intervals.push(11);
+  else if (suffix === "7" || suffix === "m7" || suffix === "aug7" || suffix.startsWith("7")) intervals.push(10);
+  else if (suffix === "dim7") intervals.push(9);
+  return intervals.map(interval => rootIdx + interval);
+}
+
+function midiToFrequency(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function buildChordSample(ctx, label) {
+  const noteNumbers = getChordIntervals(label);
+  if (!noteNumbers) return null;
+  const sampleDuration = 5;
+  const sampleRate = ctx.sampleRate;
+  const buffer = ctx.createBuffer(1, Math.floor(sampleDuration * sampleRate), sampleRate);
+  const data = buffer.getChannelData(0);
+  const baseMidi = 48;
+  const freqs = noteNumbers.map(note => midiToFrequency(baseMidi + note)).filter(Boolean);
+  const strumDelay = 0.035;
+  for (let i = 0; i < data.length; i++) {
+    const t = i / sampleRate;
+    let value = 0;
+    freqs.forEach((freq, noteIndex) => {
+      const localT = t - noteIndex * strumDelay;
+      if (localT < 0) return;
+      const attack = Math.min(localT / 0.025, 1);
+      const decay = Math.exp(-localT * 1.35);
+      const tone = Math.sin(2 * Math.PI * freq * localT) * 0.7
+        + Math.sin(2 * Math.PI * freq * 2 * localT) * 0.18
+        + Math.sin(2 * Math.PI * freq * 3 * localT) * 0.08;
+      value += tone * attack * decay;
+    });
+    data[i] = Math.max(-1, Math.min(1, value / Math.max(freqs.length, 1) * 0.8));
+  }
+  return buffer;
+}
+
+const chordAudioDatabase = new Map();
+
+function ensureChordAudioDatabase(final, ctx) {
+  final.forEach(ch => {
+    if (!chordAudioDatabase.has(ch.label)) {
+      const buffer = buildChordSample(ctx, ch.label);
+      if (buffer) chordAudioDatabase.set(ch.label, { label: ch.label, buffer });
+    }
+  });
+}
+
 function renderChordTab(chord, label) {
   if (!chord) return "";
   const positions = chord.positions;
@@ -770,6 +874,18 @@ const secDomChk = document.getElementById("secDom");
 const modalChk = document.getElementById("modal");
 const extChk = document.getElementById("ext");
 const subsChk = document.getElementById("subs");
+const tempoInput = document.getElementById("tempo");
+const tempoValue = document.getElementById("tempoValue");
+const playLoopBtn = document.getElementById("playLoop");
+const stopLoopBtn = document.getElementById("stopLoop");
+const playbackStatus = document.getElementById("playbackStatus");
+
+let audioCtx = null;
+let playbackTimer = null;
+let loopPlaying = false;
+let loopIndex = 0;
+let nextChordTime = 0;
+let activeSource = null;
 
 /* populate base progressions */
 PROGRESSIONS.forEach(p => {
@@ -785,14 +901,78 @@ function getBaseByName(name) {
 }
 
 /* render progression pills */
-function renderProgression(final) {
+function renderProgression(final, activeIndex = -1) {
   progressionArea.innerHTML = "";
-  final.forEach(ch => {
+  final.forEach((ch, index) => {
     const d = document.createElement("div");
-    d.className = "pill";
+    d.className = index === activeIndex ? "pill active" : "pill";
     d.textContent = ch.label;
     progressionArea.appendChild(d);
   });
+}
+
+function getChordDurationSeconds() {
+  const bpm = Math.max(50, Math.min(180, Number(tempoInput.value) || 100));
+  return 60 / bpm * 4;
+}
+
+function stopLoop() {
+  loopPlaying = false;
+  if (playbackTimer) clearTimeout(playbackTimer);
+  playbackTimer = null;
+  if (activeSource) {
+    try { activeSource.stop(); } catch {}
+    activeSource = null;
+  }
+  loopIndex = 0;
+  renderProgression(window._lastGenerated?.final || []);
+  playbackStatus.textContent = "Stopped. Each chord plays for 1 bar in 4/4.";
+}
+
+function scheduleChord(chord, when, duration) {
+  const entry = chordAudioDatabase.get(chord.label);
+  if (!entry) return;
+  const source = audioCtx.createBufferSource();
+  const gain = audioCtx.createGain();
+  source.buffer = entry.buffer;
+  source.connect(gain).connect(audioCtx.destination);
+  gain.gain.setValueAtTime(0.001, when);
+  gain.gain.linearRampToValueAtTime(0.65, when + 0.02);
+  gain.gain.setValueAtTime(0.65, Math.max(when + 0.03, when + duration - 0.08));
+  gain.gain.exponentialRampToValueAtTime(0.001, when + duration);
+  source.start(when);
+  source.stop(when + duration);
+  activeSource = source;
+}
+
+function runLoopScheduler() {
+  if (!loopPlaying) return;
+  const final = window._lastGenerated?.final || [];
+  if (!final.length) return stopLoop();
+  const duration = getChordDurationSeconds();
+  while (nextChordTime < audioCtx.currentTime + 0.18) {
+    const chord = final[loopIndex % final.length];
+    scheduleChord(chord, nextChordTime, duration);
+    renderProgression(final, loopIndex % final.length);
+    playbackStatus.textContent = `Playing ${chord.label}. 1 chord = 1 bar (${duration.toFixed(2)} sec).`;
+    loopIndex += 1;
+    nextChordTime += duration;
+  }
+  playbackTimer = setTimeout(runLoopScheduler, 50);
+}
+
+async function playLoop() {
+  const final = window._lastGenerated?.final || [];
+  if (!final.length) return;
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") await audioCtx.resume();
+  ensureChordAudioDatabase(final, audioCtx);
+  stopLoop();
+  loopPlaying = true;
+  loopIndex = 0;
+  nextChordTime = audioCtx.currentTime + 0.05;
+  playbackStatus.textContent = `Loaded ${final.length} cached chord samples. Starting loop...`;
+  runLoopScheduler();
 }
 
 /* render guitar tabs per chord */
@@ -846,6 +1026,7 @@ function renderGuitarTabs(final) {
 
 /* main generate pipeline */
 function generate() {
+  stopLoop();
   const key = keySelect.value;
   const keyInfo = getScale(key);
   const base = getBaseByName(baseSelect.value);
@@ -867,6 +1048,14 @@ function generate() {
 
 /* ensure Generate actually works when clicked */
 generateBtn.addEventListener("click", generate);
+playLoopBtn.addEventListener("click", playLoop);
+stopLoopBtn.addEventListener("click", stopLoop);
+tempoInput.addEventListener("input", () => {
+  tempoValue.textContent = tempoInput.value;
+  if (loopPlaying) {
+    playbackStatus.textContent = `Tempo changed to ${tempoInput.value} BPM. The next chord will use the new bar length.`;
+  }
+});
 
 /* initial generate so UI shows something */
 generate();
