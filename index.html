@@ -23,7 +23,7 @@
   .chords{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
   .pill{background:#071428;padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,0.03);font-weight:700}
   .pill.active{border-color:var(--accent);box-shadow:0 0 0 2px rgba(111,139,255,0.18);color:white}
-  textarea{width:100%;height:90px;background:#071028;color:#dfe8ff;border-radius:8px;padding:10px;border:1px solid rgba(255,255,255,0.03);margin-top:10px}
+  textarea{width:100%;height:90px;background:#071028;color:#dfe8ff;border-radius:8px;padding:10px;border:1px solid rgba(255,255,255,0.03);margin-top:10px;resize:none}
   .small{font-size:13px;color:var(--muted)}
   .chord-grid{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px}
   .chord-card{text-align:center;min-width:90px}
@@ -39,6 +39,12 @@
   .spice-guide dd{margin:4px 0 0;color:var(--muted);font-size:13px;line-height:1.45}
   .playback-controls{display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin-top:10px}
   .tempo-control{display:grid;gap:6px;min-width:220px}
+  .variation-toggle{margin-top:12px}
+  .variation-panel{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.05)}
+  .variation-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+  .variation-control{display:grid;gap:6px}
+  .variation-control strong{font-size:13px}
+  .variation-control select{width:100%}
 </style>
 </head>
 <body>
@@ -93,6 +99,8 @@
       <div class="panel" style="margin-top:12px">
         <h3 style="margin:0">Generated progression</h3>
         <div id="progressionArea" class="chords" aria-live="polite"></div>
+        <button id="toggleVariations" class="secondary variation-toggle" type="button" aria-expanded="false" aria-controls="variationPanel">Change chord variations</button>
+        <div id="variationPanel" class="variation-panel" hidden></div>
       </div>
 
       <div class="panel" style="margin-top:12px">
@@ -104,7 +112,7 @@
           </div>
           <button id="playLoop">Play loop</button>
           <button id="stopLoop" class="secondary">Stop</button>
-          <div id="playbackStatus" class="small">Each chord plays for 1 bar in 4/4.</div>
+          <div id="playbackStatus" class="small">Each loop is 4 bars total in 4/4.</div>
         </div>
       </div>
 
@@ -407,6 +415,17 @@ const QUALITY_SUFFIX_MAP = {
   "major":"","minor":"m","dom7":"7","major7":"maj7","maj7":"maj7","minor7":"m7","min7":"m7",
   "dim7":"dim7","aug7":"aug7","aug":"+","sus4":"sus4","dim":"dim","sus":"sus4"
 };
+
+const CHORD_VARIATIONS = [
+  { name: "Major", suffix: "" },
+  { name: "maj7", suffix: "maj7" },
+  { name: "dom7", suffix: "7" },
+  { name: "Minor", suffix: "m" },
+  { name: "min7", suffix: "m7" },
+  { name: "sus4", suffix: "sus4" },
+  { name: "dim", suffix: "dim" },
+  { name: "aug", suffix: "+" }
+];
 
 const NOTE_ALIASES = { "Db":"C#", "Eb":"D#", "Gb":"F#", "Ab":"G#", "Bb":"A#" };
 
@@ -860,6 +879,52 @@ function finalizeSequence(items, keyInfo) {
   return final;
 }
 
+function applyLoopBarLengths(final, items) {
+  if (!final.length) return final;
+  const timed = final.map((ch, index) => ({
+    ...ch,
+    bars: items[index]?.type === "secDom" || items[index]?.type === "tritoneSub" ? 0.5 : 1
+  }));
+
+  let totalBars = timed.reduce((sum, ch) => sum + ch.bars, 0);
+  if (totalBars > 4 && timed[0].bars === 0.5 && timed[timed.length - 1].bars > 0.5) {
+    timed[timed.length - 1].bars = 0.5;
+    totalBars -= 0.5;
+  }
+
+  for (let i = 1; totalBars > 4 && i < timed.length; i++) {
+    if (timed[i - 1].bars === 0.5 && timed[i].bars > 0.5) {
+      timed[i].bars = 0.5;
+      totalBars -= 0.5;
+    }
+  }
+
+  for (let i = timed.length - 1; totalBars > 4 && i >= 0; i--) {
+    if (timed[i].bars > 0.5) {
+      timed[i].bars = 0.5;
+      totalBars -= 0.5;
+    }
+  }
+
+  if (totalBars < 4) {
+    const followers = timed.filter((ch, index) => index > 0 && timed[index - 1].bars === 0.5 && ch.bars > 0.5);
+    const recipients = followers.length ? followers : timed.filter(ch => ch.bars > 0.5);
+    const addBars = (4 - totalBars) / (recipients.length || timed.length);
+    (recipients.length ? recipients : timed).forEach(ch => ch.bars += addBars);
+    totalBars = 4;
+  }
+
+  if (totalBars !== 4) {
+    const scale = 4 / totalBars;
+    timed.forEach(ch => ch.bars *= scale);
+  }
+  return timed;
+}
+
+function formatBars(bars) {
+  return Number.isInteger(bars) ? String(bars) : bars.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
 /* UI wiring */
 
 const baseSelect = document.getElementById("baseSelect");
@@ -867,6 +932,8 @@ const keySelect = document.getElementById("keySelect");
 const generateBtn = document.getElementById("generate");
 const progressionArea = document.getElementById("progressionArea");
 const exportArea = document.getElementById("exportArea");
+const toggleVariationsBtn = document.getElementById("toggleVariations");
+const variationPanel = document.getElementById("variationPanel");
 const copyBtn = document.getElementById("copy");
 const seedInput = document.getElementById("seed");
 const guitarArea = document.getElementById("guitarArea");
@@ -907,11 +974,70 @@ function renderProgression(final, activeIndex = -1) {
     const d = document.createElement("div");
     d.className = index === activeIndex ? "pill active" : "pill";
     d.textContent = ch.label;
+    const bars = ch.bars || 1;
+    d.title = `${formatBars(bars)} bar${bars === 1 ? "" : "s"}`;
     progressionArea.appendChild(d);
   });
 }
 
-function getChordDurationSeconds() {
+function updateExportText() {
+  const data = window._lastGenerated;
+  if (!data) return;
+  const letters = data.final.map(f => `${f.label} (${formatBars(f.bars)} bar${f.bars === 1 ? "" : "s"})`).join(" | ");
+  exportArea.value = `Key: ${data.key}\nBase: ${data.baseName}\nSpice: ${data.spiceOpts.join(", ") || "none"}\nProgression: ${letters}\nLoop length: 4 bars`;
+}
+
+function renderVariationPanel(final) {
+  variationPanel.innerHTML = "";
+  if (!final.length) return;
+
+  const note = document.createElement("div");
+  note.className = "small";
+  note.textContent = "Pick a quality for each generated chord. Guitar tabs, playback, and export update automatically.";
+  variationPanel.appendChild(note);
+
+  const grid = document.createElement("div");
+  grid.className = "variation-grid";
+  final.forEach((ch, index) => {
+    const parsed = parseChordLabel(ch.label);
+    if (!parsed) return;
+
+    const wrap = document.createElement("label");
+    wrap.className = "variation-control";
+    const title = document.createElement("strong");
+    title.textContent = ch.label;
+    const select = document.createElement("select");
+    select.dataset.index = String(index);
+    if (!CHORD_VARIATIONS.some(variation => variation.suffix === parsed.suffix)) {
+      const current = document.createElement("option");
+      current.value = parsed.suffix;
+      current.textContent = `${ch.label} (current)`;
+      current.selected = true;
+      select.appendChild(current);
+    }
+    CHORD_VARIATIONS.forEach(variation => {
+      const opt = document.createElement("option");
+      opt.value = variation.suffix;
+      opt.textContent = `${parsed.root}${variation.suffix || ""} (${variation.name})`;
+      opt.selected = variation.suffix === parsed.suffix;
+      select.appendChild(opt);
+    });
+    wrap.appendChild(title);
+    wrap.appendChild(select);
+    grid.appendChild(wrap);
+  });
+  variationPanel.appendChild(grid);
+}
+
+function refreshGeneratedDisplay(activeIndex = -1) {
+  const final = window._lastGenerated?.final || [];
+  renderProgression(final, activeIndex);
+  renderGuitarTabs(final);
+  renderVariationPanel(final);
+  updateExportText();
+}
+
+function getBarDurationSeconds() {
   const bpm = Math.max(50, Math.min(180, Number(tempoInput.value) || 100));
   return 60 / bpm * 4;
 }
@@ -926,7 +1052,7 @@ function stopLoop() {
   }
   loopIndex = 0;
   renderProgression(window._lastGenerated?.final || []);
-  playbackStatus.textContent = "Stopped. Each chord plays for 1 bar in 4/4.";
+  playbackStatus.textContent = "Stopped. Each loop is 4 bars total in 4/4.";
 }
 
 function scheduleChord(chord, when, duration) {
@@ -949,12 +1075,14 @@ function runLoopScheduler() {
   if (!loopPlaying) return;
   const final = window._lastGenerated?.final || [];
   if (!final.length) return stopLoop();
-  const duration = getChordDurationSeconds();
+  const barDuration = getBarDurationSeconds();
   while (nextChordTime < audioCtx.currentTime + 0.18) {
     const chord = final[loopIndex % final.length];
+    const bars = chord.bars || 1;
+    const duration = barDuration * bars;
     scheduleChord(chord, nextChordTime, duration);
     renderProgression(final, loopIndex % final.length);
-    playbackStatus.textContent = `Playing ${chord.label}. 1 chord = 1 bar (${duration.toFixed(2)} sec).`;
+    playbackStatus.textContent = `Playing ${chord.label}. ${formatBars(bars)} bar${bars === 1 ? "" : "s"}; loop = 4 bars.`;
     loopIndex += 1;
     nextChordTime += duration;
   }
@@ -1038,18 +1166,33 @@ function generate() {
   if (modalChk.checked) { seq = applyModalInterchange(seq, keyInfo, rng); spiceOpts.push("Modal"); }
   if (subsChk.checked) { seq = applySubstitutions(seq, keyInfo, rng); spiceOpts.push("Subs"); }
   if (extChk.checked) { seq = applyExtensions(seq, keyInfo, rng); spiceOpts.push("Extensions"); }
-  const final = finalizeSequence(seq, keyInfo);
-  renderProgression(final);
-  renderGuitarTabs(final);
-  const letters = final.map(f => f.label).join(" | ");
-  exportArea.value = `Key: ${key}\nBase: ${base.name}\nSpice: ${spiceOpts.join(", ") || "none"}\nProgression: ${letters}`;
-  window._lastGenerated = { final, keyInfo, key, baseName: base.name };
+  const final = applyLoopBarLengths(finalizeSequence(seq, keyInfo), seq);
+  window._lastGenerated = { final, keyInfo, key, baseName: base.name, spiceOpts };
+  refreshGeneratedDisplay();
 }
 
 /* ensure Generate actually works when clicked */
 generateBtn.addEventListener("click", generate);
 playLoopBtn.addEventListener("click", playLoop);
 stopLoopBtn.addEventListener("click", stopLoop);
+toggleVariationsBtn.addEventListener("click", () => {
+  const expanded = variationPanel.hidden;
+  variationPanel.hidden = !expanded;
+  toggleVariationsBtn.setAttribute("aria-expanded", String(expanded));
+  toggleVariationsBtn.textContent = expanded ? "Hide chord variations" : "Change chord variations";
+});
+variationPanel.addEventListener("change", event => {
+  const select = event.target.closest("select");
+  if (!select) return;
+  const final = window._lastGenerated?.final || [];
+  const index = Number(select.dataset.index);
+  const chord = final[index];
+  const parsed = parseChordLabel(chord?.label || "");
+  if (!chord || !parsed) return;
+  if (loopPlaying) stopLoop();
+  chord.label = parsed.root + select.value;
+  refreshGeneratedDisplay();
+});
 tempoInput.addEventListener("input", () => {
   tempoValue.textContent = tempoInput.value;
   if (loopPlaying) {
