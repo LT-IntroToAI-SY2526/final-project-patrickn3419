@@ -44,7 +44,10 @@
   .variation-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
   .variation-control{display:grid;gap:6px}
   .variation-control strong{font-size:13px}
-  .variation-control select{width:100%}
+  .variation-control select,.variation-control input{width:100%}
+  .add-chord-panel{display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.05)}
+  .add-chord-panel label{flex:1 1 120px}
+  .add-chord-panel button{flex:0 0 auto}
 </style>
 </head>
 <body>
@@ -99,7 +102,7 @@
       <div class="panel" style="margin-top:12px">
         <h3 style="margin:0">Generated progression</h3>
         <div id="progressionArea" class="chords" aria-live="polite"></div>
-        <button id="toggleVariations" class="secondary variation-toggle" type="button" aria-expanded="false" aria-controls="variationPanel">Change chord variations</button>
+        <button id="toggleVariations" class="secondary variation-toggle" type="button" aria-expanded="false" aria-controls="variationPanel">Edit progression</button>
         <div id="variationPanel" class="variation-panel" hidden></div>
       </div>
 
@@ -112,7 +115,7 @@
           </div>
           <button id="playLoop">Play loop</button>
           <button id="stopLoop" class="secondary">Stop</button>
-          <div id="playbackStatus" class="small">Each loop is 4 bars total in 4/4.</div>
+          <div id="playbackStatus" class="small">Loop length follows the chord bar durations.</div>
         </div>
       </div>
 
@@ -925,6 +928,19 @@ function formatBars(bars) {
   return Number.isInteger(bars) ? String(bars) : bars.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
+function getTotalBars(final) {
+  return final.reduce((sum, ch) => sum + (Number(ch.bars) || 1), 0);
+}
+
+function clampBars(value) {
+  return Math.max(0.25, Math.min(16, Number(value) || 1));
+}
+
+function setStoppedPlaybackStatus() {
+  const totalBars = getTotalBars(window._lastGenerated?.final || []);
+  playbackStatus.textContent = `Stopped. Loop length is ${formatBars(totalBars)} bar${totalBars === 1 ? "" : "s"}.`;
+}
+
 /* UI wiring */
 
 const baseSelect = document.getElementById("baseSelect");
@@ -983,17 +999,20 @@ function renderProgression(final, activeIndex = -1) {
 function updateExportText() {
   const data = window._lastGenerated;
   if (!data) return;
+  const totalBars = getTotalBars(data.final);
   const letters = data.final.map(f => `${f.label} (${formatBars(f.bars)} bar${f.bars === 1 ? "" : "s"})`).join(" | ");
-  exportArea.value = `Key: ${data.key}\nBase: ${data.baseName}\nSpice: ${data.spiceOpts.join(", ") || "none"}\nProgression: ${letters}\nLoop length: 4 bars`;
+  exportArea.value = `Key: ${data.key}\nBase: ${data.baseName}\nSpice: ${data.spiceOpts.join(", ") || "none"}\nProgression: ${letters}\nLoop length: ${formatBars(totalBars)} bar${totalBars === 1 ? "" : "s"}`;
 }
 
 function renderVariationPanel(final) {
   variationPanel.innerHTML = "";
   if (!final.length) return;
+  const data = window._lastGenerated;
+  const keyNotes = new Set(data?.keyInfo?.notes || []);
 
   const note = document.createElement("div");
   note.className = "small";
-  note.textContent = "Pick a quality for each generated chord. Guitar tabs, playback, and export update automatically.";
+  note.textContent = "Edit each chord quality and duration, or add a new chord from inside or outside the selected key.";
   variationPanel.appendChild(note);
 
   const grid = document.createElement("div");
@@ -1006,7 +1025,26 @@ function renderVariationPanel(final) {
     wrap.className = "variation-control";
     const title = document.createElement("strong");
     title.textContent = ch.label;
+    const rootSelect = document.createElement("select");
+    rootSelect.dataset.type = "root";
+    rootSelect.dataset.index = String(index);
+    [
+      { label: "In key", notes: NOTE_ORDER.filter(noteName => keyNotes.has(noteName)) },
+      { label: "Outside key", notes: NOTE_ORDER.filter(noteName => !keyNotes.has(noteName)) }
+    ].forEach(group => {
+      const optGroup = document.createElement("optgroup");
+      optGroup.label = group.label;
+      group.notes.forEach(noteName => {
+        const opt = document.createElement("option");
+        opt.value = noteName;
+        opt.textContent = noteName;
+        opt.selected = noteName === parsed.normalizedRoot;
+        optGroup.appendChild(opt);
+      });
+      rootSelect.appendChild(optGroup);
+    });
     const select = document.createElement("select");
+    select.dataset.type = "quality";
     select.dataset.index = String(index);
     if (!CHORD_VARIATIONS.some(variation => variation.suffix === parsed.suffix)) {
       const current = document.createElement("option");
@@ -1022,11 +1060,91 @@ function renderVariationPanel(final) {
       opt.selected = variation.suffix === parsed.suffix;
       select.appendChild(opt);
     });
+    const duration = document.createElement("input");
+    duration.type = "number";
+    duration.min = "0.25";
+    duration.max = "16";
+    duration.step = "0.25";
+    duration.value = formatBars(ch.bars || 1);
+    duration.dataset.type = "bars";
+    duration.dataset.index = String(index);
     wrap.appendChild(title);
+    wrap.appendChild(rootSelect);
     wrap.appendChild(select);
+    wrap.appendChild(duration);
     grid.appendChild(wrap);
   });
   variationPanel.appendChild(grid);
+
+  const addPanel = document.createElement("div");
+  addPanel.className = "add-chord-panel";
+  const rootLabel = document.createElement("label");
+  rootLabel.textContent = "Add root";
+  const addRoot = document.createElement("select");
+  addRoot.id = "addChordRoot";
+  [
+    { label: "In key", notes: NOTE_ORDER.filter(noteName => keyNotes.has(noteName)) },
+    { label: "Outside key", notes: NOTE_ORDER.filter(noteName => !keyNotes.has(noteName)) }
+  ].forEach(group => {
+    const optGroup = document.createElement("optgroup");
+    optGroup.label = group.label;
+    group.notes.forEach(noteName => {
+      const opt = document.createElement("option");
+      opt.value = noteName;
+      opt.textContent = noteName;
+      optGroup.appendChild(opt);
+    });
+    addRoot.appendChild(optGroup);
+  });
+  rootLabel.appendChild(addRoot);
+
+  const qualityLabel = document.createElement("label");
+  qualityLabel.textContent = "Quality";
+  const addQuality = document.createElement("select");
+  addQuality.id = "addChordQuality";
+  CHORD_VARIATIONS.forEach(variation => {
+    const opt = document.createElement("option");
+    opt.value = variation.suffix;
+    opt.textContent = variation.name;
+    addQuality.appendChild(opt);
+  });
+  qualityLabel.appendChild(addQuality);
+
+  const barsLabel = document.createElement("label");
+  barsLabel.textContent = "Bars";
+  const addBars = document.createElement("input");
+  addBars.id = "addChordBars";
+  addBars.type = "number";
+  addBars.min = "0.25";
+  addBars.max = "16";
+  addBars.step = "0.25";
+  addBars.value = "1";
+  barsLabel.appendChild(addBars);
+
+  const afterLabel = document.createElement("label");
+  afterLabel.textContent = "Place after";
+  const addAfter = document.createElement("select");
+  addAfter.id = "addChordAfter";
+  final.forEach((ch, index) => {
+    const opt = document.createElement("option");
+    opt.value = String(index);
+    opt.textContent = ch.label;
+    if (index === final.length - 1) opt.selected = true;
+    addAfter.appendChild(opt);
+  });
+  afterLabel.appendChild(addAfter);
+
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.dataset.action = "add-chord";
+  addBtn.textContent = "Add chord";
+
+  addPanel.appendChild(rootLabel);
+  addPanel.appendChild(qualityLabel);
+  addPanel.appendChild(barsLabel);
+  addPanel.appendChild(afterLabel);
+  addPanel.appendChild(addBtn);
+  variationPanel.appendChild(addPanel);
 }
 
 function refreshGeneratedDisplay(activeIndex = -1) {
@@ -1052,7 +1170,7 @@ function stopLoop() {
   }
   loopIndex = 0;
   renderProgression(window._lastGenerated?.final || []);
-  playbackStatus.textContent = "Stopped. Each loop is 4 bars total in 4/4.";
+  setStoppedPlaybackStatus();
 }
 
 function scheduleChord(chord, when, duration) {
@@ -1082,7 +1200,8 @@ function runLoopScheduler() {
     const duration = barDuration * bars;
     scheduleChord(chord, nextChordTime, duration);
     renderProgression(final, loopIndex % final.length);
-    playbackStatus.textContent = `Playing ${chord.label}. ${formatBars(bars)} bar${bars === 1 ? "" : "s"}; loop = 4 bars.`;
+    const totalBars = getTotalBars(final);
+    playbackStatus.textContent = `Playing ${chord.label}. ${formatBars(bars)} bar${bars === 1 ? "" : "s"}; loop = ${formatBars(totalBars)} bar${totalBars === 1 ? "" : "s"}.`;
     loopIndex += 1;
     nextChordTime += duration;
   }
@@ -1169,6 +1288,7 @@ function generate() {
   const final = applyLoopBarLengths(finalizeSequence(seq, keyInfo), seq);
   window._lastGenerated = { final, keyInfo, key, baseName: base.name, spiceOpts };
   refreshGeneratedDisplay();
+  setStoppedPlaybackStatus();
 }
 
 /* ensure Generate actually works when clicked */
@@ -1179,18 +1299,32 @@ toggleVariationsBtn.addEventListener("click", () => {
   const expanded = variationPanel.hidden;
   variationPanel.hidden = !expanded;
   toggleVariationsBtn.setAttribute("aria-expanded", String(expanded));
-  toggleVariationsBtn.textContent = expanded ? "Hide chord variations" : "Change chord variations";
+  toggleVariationsBtn.textContent = expanded ? "Hide progression editor" : "Edit progression";
 });
 variationPanel.addEventListener("change", event => {
-  const select = event.target.closest("select");
-  if (!select) return;
+  const control = event.target.closest("select,input");
+  if (!control) return;
   const final = window._lastGenerated?.final || [];
-  const index = Number(select.dataset.index);
+  const index = Number(control.dataset.index);
   const chord = final[index];
   const parsed = parseChordLabel(chord?.label || "");
   if (!chord || !parsed) return;
   if (loopPlaying) stopLoop();
-  chord.label = parsed.root + select.value;
+  if (control.dataset.type === "root") chord.label = control.value + parsed.suffix;
+  if (control.dataset.type === "quality") chord.label = parsed.root + control.value;
+  if (control.dataset.type === "bars") chord.bars = clampBars(control.value);
+  refreshGeneratedDisplay();
+});
+variationPanel.addEventListener("click", event => {
+  const button = event.target.closest("button[data-action='add-chord']");
+  if (!button) return;
+  const final = window._lastGenerated?.final || [];
+  const root = variationPanel.querySelector("#addChordRoot")?.value || "C";
+  const suffix = variationPanel.querySelector("#addChordQuality")?.value || "";
+  const bars = clampBars(variationPanel.querySelector("#addChordBars")?.value || 1);
+  const afterIndex = Number(variationPanel.querySelector("#addChordAfter")?.value ?? final.length - 1);
+  if (loopPlaying) stopLoop();
+  final.splice(afterIndex + 1, 0, { label: root + suffix, bars });
   refreshGeneratedDisplay();
 });
 tempoInput.addEventListener("input", () => {
